@@ -709,6 +709,89 @@ app.get("/api/attendance/count/:sessionId", async (req, res) => {
 });
 
 // -------------------------
+// AI Headcount Bridge Endpoint (Converts Base64 to Multipart for YOLO)
+// -------------------------
+app.post("/api/ai/count-people", async (req, res) => {
+  try {
+    const { image_base64, image } = req.body;
+    let rawB64 = image_base64 || image;
+
+    if (!rawB64) {
+      return res.status(400).json({
+        success: false,
+        message: "No image received. Please provide image_base64 in request body.",
+      });
+    }
+
+    if (typeof rawB64 === "string" && rawB64.includes(",")) {
+      rawB64 = rawB64.split(",")[1];
+    }
+
+    const buffer = Buffer.from(rawB64, "base64");
+    const blob = new Blob([buffer], { type: "image/jpeg" });
+    const formData = new FormData();
+    formData.append("image", blob, "classroom.jpg");
+
+    const candidateUrls = [
+      process.env.AI_SERVICE_URL,
+      "https://smart-campus-ai-pz3m.onrender.com",
+      "http://localhost:5001",
+    ].filter(Boolean);
+
+    const aiUrls = Array.from(new Set(candidateUrls));
+
+    let lastError = null;
+    for (const baseUrl of aiUrls) {
+      try {
+        const targetUrl = `${baseUrl.replace(/\/$/, "")}/count-people`;
+        console.log(`Forwarding headcount request to AI service: ${targetUrl}`);
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 60000);
+
+        const aiRes = await fetch(targetUrl, {
+          method: "POST",
+          body: formData,
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        const aiText = await aiRes.text();
+        let aiJson;
+        try {
+          aiJson = JSON.parse(aiText);
+        } catch {
+          aiJson = { message: aiText };
+        }
+
+        if (aiRes.ok && aiJson && aiJson.success !== false) {
+          return res.json({
+            success: true,
+            count: Number(aiJson.count) || 0,
+            confidence: aiJson.confidence || [],
+            message: aiJson.message || "People detected successfully",
+            aiUrl: targetUrl,
+          });
+        } else {
+          lastError = new Error(aiJson?.message || `AI error HTTP ${aiRes.status}`);
+        }
+      } catch (err) {
+        lastError = err;
+        console.warn(`AI attempt to ${baseUrl} failed:`, err.message);
+      }
+    }
+
+    throw lastError || new Error("Failed to contact AI service");
+  } catch (error) {
+    console.error("AI bridge error:", error);
+    res.status(500).json({
+      success: false,
+      message: "AI person detection service error: " + error.message,
+    });
+  }
+});
+
+// -------------------------
 // AI Headcount Verification Recording
 // -------------------------
 app.post("/api/attendance/verify-session", async (req, res) => {
