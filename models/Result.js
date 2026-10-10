@@ -69,6 +69,27 @@ const resultSchema = new mongoose.Schema({
     default: "N/A",
   },
 
+  maxMarks: {
+    type: Number,
+    default: 100,
+  },
+
+  percentage: {
+    type: Number,
+    default: 0,
+  },
+
+  published: {
+    type: Boolean,
+    default: true,
+    index: true,
+  },
+
+  facultyId: {
+    type: String,
+    default: "",
+  },
+
   remarks: {
     type: String,
     default: "",
@@ -80,7 +101,7 @@ const resultSchema = new mongoose.Schema({
   },
 });
 
-// Auto-calculate total and grade before save
+// Auto-calculate total, percentage and grade before save
 resultSchema.pre("save", function () {
   this.total =
     (this.internalMarks || 0) +
@@ -89,13 +110,16 @@ resultSchema.pre("save", function () {
     (this.midtermMarks || 0) +
     (this.endSemMarks || 0);
 
-  // Default grading based on total (out of 100 or standard)
-  if (this.total >= 90) this.grade = "O";
-  else if (this.total >= 80) this.grade = "A+";
-  else if (this.total >= 70) this.grade = "A";
-  else if (this.total >= 60) this.grade = "B+";
-  else if (this.total >= 50) this.grade = "B";
-  else if (this.total >= 40) this.grade = "P";
+  const max = this.maxMarks || 100;
+  this.percentage = max > 0 ? Number(((this.total / max) * 100).toFixed(1)) : 0;
+
+  // Standard VTU / Autonomous grading scale
+  if (this.percentage >= 90) this.grade = "O";
+  else if (this.percentage >= 80) this.grade = "A+";
+  else if (this.percentage >= 70) this.grade = "A";
+  else if (this.percentage >= 60) this.grade = "B+";
+  else if (this.percentage >= 50) this.grade = "B";
+  else if (this.percentage >= 40) this.grade = "P";
   else this.grade = "F";
 
   this.updatedAt = new Date();

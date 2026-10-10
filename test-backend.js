@@ -214,6 +214,25 @@ async function test() {
     "Lines:",
     csvRes.raw ? csvRes.raw.split("\n").length : 0
   );
+
+  console.log("\n--- 9. Session Close Test ---");
+  const closeRes = await req("POST", "/api/session/close", { sessionCode: testCode });
+  console.log("Session close status:", closeRes.status, "Active:", closeRes.body.session?.active);
+
+  console.log("\n--- 10. Results Publish / Unpublish Test ---");
+  const unpubRes = await req("POST", "/api/results/unpublish", { subject: "Operating Systems" });
+  console.log("Unpublish status:", unpubRes.status, "Modified:", unpubRes.body.modifiedCount);
+
+  const pubRes = await req("POST", "/api/results/publish", { subject: "Operating Systems" });
+  console.log("Publish status:", pubRes.status, "Modified:", pubRes.body.modifiedCount);
+
+  console.log("\n--- 11. Full Comprehensive Academic Report ---");
+  const fullReport = await req("GET", "/api/reports/student/1CD23IC001/full");
+  console.log("Full report status:", fullReport.status);
+  console.log("Student:", fullReport.body.student?.name, "Dept:", fullReport.body.student?.department);
+  console.log("Overall Attendance:", fullReport.body.attendance?.overall?.percentage + "%");
+  console.log("Overall Marks %:", fullReport.body.academics?.overallPercentage + "%", "SGPA:", fullReport.body.academics?.sgpa);
+  console.log("Weak Subjects Count:", fullReport.body.academics?.weakSubjectsCount);
 }
 
 test().catch(console.error);

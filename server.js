@@ -13,6 +13,8 @@ const User = require("./models/User");
 const Notice = require("./models/Notice");
 const Result = require("./models/Result");
 const Subject = require("./models/Subject");
+const CampusConfig = require("./models/CampusConfig");
+const Department = require("./models/Department");
 
 const app = express();
 
@@ -36,8 +38,48 @@ mongoose
 // -------------------------
 // Default Data Seeder
 // -------------------------
+let cachedCampusConfig = {
+  name: "Cambridge Institute of Technology, Bengaluru",
+  address: "TC Palya, KR Puram, Jai Bhuvaneshwari Layout Road, SR Layout, Chikkabasavanapura, Krishnarajapura, Bengaluru, Karnataka 560036, India",
+  latitude: parseFloat(process.env.CAMPUS_LATITUDE || "13.0108"),
+  longitude: parseFloat(process.env.CAMPUS_LONGITUDE || "77.7012"),
+  radiusMeters: parseFloat(process.env.CAMPUS_RADIUS_METERS || "150"),
+  maxAccuracyMeters: parseFloat(process.env.CAMPUS_MAX_ACCURACY || "100"),
+  attendanceThreshold: parseFloat(process.env.ATTENDANCE_THRESHOLD || "75"),
+};
+
 async function seedDefaultData() {
   try {
+    // 0. Seed Central Campus Configuration
+    let campusDoc = await CampusConfig.findOne();
+    if (!campusDoc) {
+      campusDoc = await CampusConfig.create(cachedCampusConfig);
+    }
+    cachedCampusConfig = {
+      name: campusDoc.name,
+      address: campusDoc.address,
+      latitude: campusDoc.latitude,
+      longitude: campusDoc.longitude,
+      radiusMeters: campusDoc.radiusMeters,
+      maxAccuracyMeters: campusDoc.maxAccuracyMeters,
+      attendanceThreshold: campusDoc.attendanceThreshold,
+    };
+
+    // 0.1 Seed Dynamic Departments
+    const initialDepts = [
+      { name: "Computer Science and Engineering", code: "CSE", totalSemesters: 8 },
+      { name: "CSE (IoT & Cyber Security)", code: "CSE (IoT)", totalSemesters: 8 },
+      { name: "Artificial Intelligence & Machine Learning", code: "AI/ML", totalSemesters: 8 },
+      { name: "Electronics & Communication Engineering", code: "ECE", totalSemesters: 8 },
+      { name: "Information Science and Engineering", code: "ISE", totalSemesters: 8 },
+    ];
+    for (const d of initialDepts) {
+      const dExists = await Department.findOne({ code: d.code });
+      if (!dExists) {
+        await Department.create(d);
+      }
+    }
+
     // 1. Ensure test users exist
     const defaultUsers = [
       {
@@ -77,7 +119,7 @@ async function seedDefaultData() {
         role: "faculty",
         studentId: "",
         department: "CSE (IoT)",
-        assignedSubjects: ["Operating Systems", "Computer Networks", "IoT Systems"],
+        assignedSubjects: ["Operating Systems", "Computer Networks", "IoT Architecture & Protocols", "Database Management Systems"],
       },
       {
         name: "System Admin",
@@ -106,6 +148,7 @@ async function seedDefaultData() {
               department: u.department || existing.department || "CSE (IoT)",
               semester: u.semester || existing.semester || 5,
               studentId: u.studentId || existing.studentId || "1CD23IC001",
+              assignedSubjects: u.assignedSubjects || existing.assignedSubjects || [],
             },
           }
         );
@@ -114,17 +157,17 @@ async function seedDefaultData() {
 
     // 2. Ensure standard subjects exist across departments
     const defaultSubjects = [
-      { name: "Operating Systems", code: "BCS501", department: "CSE (IoT)", semester: 5 },
-      { name: "Computer Networks", code: "BCS502", department: "CSE (IoT)", semester: 5 },
-      { name: "Database Management Systems", code: "BCS503", department: "CSE (IoT)", semester: 5 },
-      { name: "Design and Analysis of Algorithms", code: "BCS504", department: "CSE (IoT)", semester: 5 },
-      { name: "IoT Architecture & Protocols", code: "BIO505", department: "CSE (IoT)", semester: 5 },
-      { name: "Data Structures & Algorithms", code: "BCS301", department: "CSE", semester: 3 },
-      { name: "Software Engineering", code: "BCS502", department: "CSE", semester: 5 },
-      { name: "Machine Learning", code: "BAI501", department: "AI/ML", semester: 5 },
-      { name: "Deep Learning & Neural Networks", code: "BAI502", department: "AI/ML", semester: 5 },
-      { name: "Digital Signal Processing", code: "BEC501", department: "ECE", semester: 5 },
-      { name: "Microcontrollers & Embedded Systems", code: "BEC502", department: "ECE", semester: 5 },
+      { name: "Operating Systems", code: "BCS501", department: "CSE (IoT)", semester: 5, facultyName: "Prof. Sharma" },
+      { name: "Computer Networks", code: "BCS502", department: "CSE (IoT)", semester: 5, facultyName: "Prof. Sharma" },
+      { name: "Database Management Systems", code: "BCS503", department: "CSE (IoT)", semester: 5, facultyName: "Prof. Sharma" },
+      { name: "Design and Analysis of Algorithms", code: "BCS504", department: "CSE (IoT)", semester: 5, facultyName: "Dr. K. Rao" },
+      { name: "IoT Architecture & Protocols", code: "BIO505", department: "CSE (IoT)", semester: 5, facultyName: "Prof. Sharma" },
+      { name: "Data Structures & Algorithms", code: "BCS301", department: "CSE", semester: 3, facultyName: "Prof. A. Nair" },
+      { name: "Software Engineering", code: "BCS502", department: "CSE", semester: 5, facultyName: "Dr. P. Sen" },
+      { name: "Machine Learning", code: "BAI501", department: "AI/ML", semester: 5, facultyName: "Prof. R. Menon" },
+      { name: "Deep Learning & Neural Networks", code: "BAI502", department: "AI/ML", semester: 5, facultyName: "Prof. R. Menon" },
+      { name: "Digital Signal Processing", code: "BEC501", department: "ECE", semester: 5, facultyName: "Dr. V. Hegde" },
+      { name: "Microcontrollers & Embedded Systems", code: "BEC502", department: "ECE", semester: 5, facultyName: "Dr. V. Hegde" },
     ];
 
     for (const s of defaultSubjects) {
@@ -134,7 +177,72 @@ async function seedDefaultData() {
       }
     }
 
-    // 3. Ensure sample results exist for Student 1 so "My Results" is immediately populated
+    // 3. Ensure realistic attendance sessions & records for Student 1
+    // Matches exact example: Operating Systems 18/30 attended (60% -> 18 needed)
+    const seedSubjectsAttendance = [
+      { subject: "Operating Systems", heldCount: 30, attendedCount: 18, codeBase: "101" },
+      { subject: "Computer Networks", heldCount: 32, attendedCount: 28, codeBase: "201" },
+      { subject: "Database Management Systems", heldCount: 28, attendedCount: 24, codeBase: "301" },
+      { subject: "Design and Analysis of Algorithms", heldCount: 20, attendedCount: 14, codeBase: "401" },
+      { subject: "IoT Architecture & Protocols", heldCount: 25, attendedCount: 22, codeBase: "501" },
+    ];
+
+    for (const sa of seedSubjectsAttendance) {
+      const existingSessions = await AttendanceSession.countDocuments({
+        subject: sa.subject,
+        department: "CSE (IoT)",
+      });
+
+      if (existingSessions < sa.heldCount) {
+        const toCreate = sa.heldCount - existingSessions;
+        for (let i = 1; i <= toCreate; i++) {
+          const sessIndex = existingSessions + i;
+          const sessId = `SEED-${sa.subject.substring(0, 3).toUpperCase()}-${sessIndex}`;
+          const sessCode = `${sa.codeBase}${String(sessIndex).padStart(3, "0")}`.substring(0, 6);
+
+          const sessDoc = await AttendanceSession.findOneAndUpdate(
+            { sessionId: sessId },
+            {
+              subject: sa.subject,
+              sessionId: sessId,
+              sessionCode: sessCode,
+              department: "CSE (IoT)",
+              semester: 5,
+              facultyName: "Prof. Sharma",
+              active: sessIndex === sa.heldCount, // latest session active
+              attendanceCount: sa.attendedCount,
+            },
+            { upsert: true, new: true }
+          );
+
+          // Mark present for first sa.attendedCount sessions
+          if (sessIndex <= sa.attendedCount) {
+            await Attendance.findOneAndUpdate(
+              { studentId: "1CD23IC001", sessionId: sessId },
+              {
+                studentId: "1CD23IC001",
+                studentName: "Student 1",
+                department: "CSE (IoT)",
+                semester: 5,
+                subject: sa.subject,
+                sessionId: sessId,
+                sessionCode: sessCode,
+                status: "Present",
+                locationVerified: true,
+                latitude: 13.0108,
+                longitude: 77.7012,
+                accuracy: 12,
+                distanceFromCampus: 15,
+                markedAt: new Date(Date.now() - (sa.heldCount - sessIndex) * 86400000),
+              },
+              { upsert: true }
+            );
+          }
+        }
+      }
+    }
+
+    // 4. Ensure sample academic results exist for Student 1
     const sampleResults = [
       {
         studentId: "1CD23IC001",
@@ -142,12 +250,14 @@ async function seedDefaultData() {
         department: "CSE (IoT)",
         semester: 5,
         subject: "Operating Systems",
-        internalMarks: 26,
-        assignmentMarks: 18,
-        labMarks: 23,
-        midtermMarks: 24,
+        internalMarks: 22,
+        assignmentMarks: 14,
+        labMarks: 18,
+        midtermMarks: 16,
         endSemMarks: 0,
-        remarks: "Good academic standing",
+        maxMarks: 100,
+        published: true,
+        remarks: "Needs improvement in internal assignments",
       },
       {
         studentId: "1CD23IC001",
@@ -155,12 +265,14 @@ async function seedDefaultData() {
         department: "CSE (IoT)",
         semester: 5,
         subject: "Computer Networks",
-        internalMarks: 22,
-        assignmentMarks: 15,
-        labMarks: 20,
-        midtermMarks: 21,
+        internalMarks: 26,
+        assignmentMarks: 18,
+        labMarks: 22,
+        midtermMarks: 24,
         endSemMarks: 0,
-        remarks: "Needs improvement in lab practice",
+        maxMarks: 100,
+        published: true,
+        remarks: "Consistent academic performance",
       },
       {
         studentId: "1CD23IC001",
@@ -170,22 +282,86 @@ async function seedDefaultData() {
         subject: "Database Management Systems",
         internalMarks: 28,
         assignmentMarks: 19,
-        labMarks: 25,
+        labMarks: 24,
         midtermMarks: 27,
         endSemMarks: 0,
-        remarks: "Excellent performance",
+        maxMarks: 100,
+        published: true,
+        remarks: "Excellent grasp of database concepts",
+      },
+      {
+        studentId: "1CD23IC001",
+        studentName: "Student 1",
+        department: "CSE (IoT)",
+        semester: 5,
+        subject: "Design and Analysis of Algorithms",
+        internalMarks: 18,
+        assignmentMarks: 12,
+        labMarks: 14,
+        midtermMarks: 14,
+        endSemMarks: 0,
+        maxMarks: 100,
+        published: true,
+        remarks: "Weak subject. Extra practice on dynamic programming recommended",
+      },
+      {
+        studentId: "1CD23IC001",
+        studentName: "Student 1",
+        department: "CSE (IoT)",
+        semester: 5,
+        subject: "IoT Architecture & Protocols",
+        internalMarks: 27,
+        assignmentMarks: 19,
+        labMarks: 25,
+        midtermMarks: 26,
+        endSemMarks: 0,
+        maxMarks: 100,
+        published: true,
+        remarks: "Very active in hands-on sensor labs",
       },
     ];
 
     for (const r of sampleResults) {
-      const resExists = await Result.findOne({ studentId: r.studentId, subject: r.subject });
-      if (!resExists) {
-        const doc = new Result(r);
+      const doc = await Result.findOne({ studentId: r.studentId, subject: r.subject });
+      if (!doc) {
+        const newDoc = new Result(r);
+        await newDoc.save();
+      } else {
+        Object.assign(doc, r);
         await doc.save();
       }
     }
 
-    console.log("Default seed data initialized");
+    // 5. Seed Campus Notices
+    const sampleNotices = [
+      {
+        title: "Cambridge Institute: 75% Attendance Mandatory for End-Sem Exams",
+        message: "As per VTU guidelines and Cambridge Institute of Technology academic regulations, all students must maintain minimum 75% attendance in each registered subject to be eligible for semester-end examinations.",
+        department: "All",
+        role: "student",
+      },
+      {
+        title: "Smart Campus Geofencing Active Across KR Puram Campus",
+        message: "Mobile attendance marking via QR code or 6-digit session code requires active GPS location verification inside the Cambridge Institute of Technology 150m boundary.",
+        department: "All",
+        role: "all",
+      },
+      {
+        title: "Internal Assessment 2 Schedule Announced",
+        message: "IA-2 for 5th semester CSE (IoT) subjects commences next Monday. Review your weak subjects and performance analytics on your student dashboard.",
+        department: "CSE (IoT)",
+        role: "student",
+      },
+    ];
+
+    for (const n of sampleNotices) {
+      const nExists = await Notice.findOne({ title: n.title });
+      if (!nExists) {
+        await Notice.create(n);
+      }
+    }
+
+    console.log("Default seed data initialized successfully for Cambridge Institute of Technology");
   } catch (err) {
     console.warn("Seeding notice:", err.message);
   }
@@ -213,14 +389,10 @@ function getDistanceFromLatLonInMeters(lat1, lon1, lat2, lon2) {
 }
 
 function verifyCampusLocation(latitude, longitude, accuracy) {
-  const campusLat = parseFloat(process.env.CAMPUS_LATITUDE);
-  const campusLon = parseFloat(process.env.CAMPUS_LONGITUDE);
-  const campusRadius = parseFloat(process.env.CAMPUS_RADIUS_METERS || "150");
-  const maxAccuracy = parseFloat(
-    process.env.MAX_GPS_ACCURACY_METERS ||
-      process.env.CAMPUS_MAX_ACCURACY ||
-      "100"
-  );
+  const campusLat = cachedCampusConfig.latitude || parseFloat(process.env.CAMPUS_LATITUDE || "13.0108");
+  const campusLon = cachedCampusConfig.longitude || parseFloat(process.env.CAMPUS_LONGITUDE || "77.7012");
+  const campusRadius = cachedCampusConfig.radiusMeters || parseFloat(process.env.CAMPUS_RADIUS_METERS || "150");
+  const maxAccuracy = cachedCampusConfig.maxAccuracyMeters || parseFloat(process.env.CAMPUS_MAX_ACCURACY || "100");
 
   if (!isNaN(campusLat) && !isNaN(campusLon)) {
     if (
@@ -273,44 +445,65 @@ function verifyCampusLocation(latitude, longitude, accuracy) {
 }
 
 // -------------------------
-// Helper: 75% Attendance Mathematical Calculation
+// Helper: 75% Attendance Mathematical Calculation & Eligibility Buffer
 // -------------------------
 function calculateAttendanceStats(held, attended, threshold = 75) {
   const actualHeld = Math.max(Number(held) || 0, Number(attended) || 0);
   const actualAttended = Math.max(Number(attended) || 0, 0);
+  const classesMissed = Math.max(0, actualHeld - actualAttended);
 
-  const percentage =
-    actualHeld > 0
-      ? Number(((actualAttended / actualHeld) * 100).toFixed(1))
-      : 0;
+  if (actualHeld === 0) {
+    return {
+      classesHeld: 0,
+      classesAttended: 0,
+      classesMissed: 0,
+      percentage: 0,
+      classesNeeded: 0,
+      classesCanMiss: 0,
+      status: "No attendance data yet",
+      isLow: false,
+      isEligible: false,
+      message: "No attendance data yet",
+    };
+  }
 
+  const percentage = Number(((actualAttended / actualHeld) * 100).toFixed(1));
   let classesNeeded = 0;
-  let status = "75% requirement met";
-  let isLow = false;
+  let classesCanMiss = 0;
+  const isLow = percentage < threshold;
 
-  // Formula:
-  // (attended + x) / (held + x) >= threshold / 100
-  // 100 * attended + 100 * x >= threshold * held + threshold * x
-  // (100 - threshold) * x >= threshold * held - 100 * attended
-  // x >= (threshold * held - 100 * attended) / (100 - threshold)
-  if (percentage < threshold) {
-    isLow = true;
-    status = "Low Attendance";
+  if (isLow) {
+    // Formula:
+    // (attended + x) / (held + x) >= threshold / 100
+    // (100 - threshold) * x >= threshold * held - 100 * attended
+    // x >= (threshold * held - 100 * attended) / (100 - threshold)
     const numerator = threshold * actualHeld - 100 * actualAttended;
     const denominator = 100 - threshold;
     classesNeeded = Math.max(0, Math.ceil(numerator / denominator));
+  } else {
+    // Future classes that can still be missed while retaining at least threshold:
+    // attended / (held + y) >= threshold / 100
+    // 100 * attended >= threshold * held + threshold * y
+    // y <= (100 * attended - threshold * held) / threshold
+    const numerator = 100 * actualAttended - threshold * actualHeld;
+    classesCanMiss = Math.max(0, Math.floor(numerator / threshold));
   }
 
   return {
     classesHeld: actualHeld,
     classesAttended: actualAttended,
+    classesMissed,
     percentage,
     classesNeeded,
+    classesCanMiss,
     status: isLow ? "Low Attendance" : "75% requirement met",
     isLow,
+    isEligible: !isLow,
     message: isLow
-      ? `You need to attend ${classesNeeded} more classes to reach ${threshold}%.`
-      : "75% requirement met",
+      ? `You need to attend ${classesNeeded} more consecutive classes to reach ${threshold}%.`
+      : classesCanMiss > 0
+      ? `You can safely miss ${classesCanMiss} upcoming class(es) without falling below ${threshold}%.`
+      : "75% requirement met. Maintain attendance to remain eligible.",
   };
 }
 
@@ -350,42 +543,330 @@ app.get("/", (req, res) => {
   });
 });
 
-app.get("/api/campus-config", (req, res) => {
-  res.json({
-    latitude: parseFloat(process.env.CAMPUS_LATITUDE || "13.0108"),
-    longitude: parseFloat(process.env.CAMPUS_LONGITUDE || "77.7012"),
-    radiusMeters: parseFloat(process.env.CAMPUS_RADIUS_METERS || "150"),
-    maxAccuracyMeters: parseFloat(process.env.CAMPUS_MAX_ACCURACY || "100"),
-    attendanceThreshold: parseFloat(process.env.ATTENDANCE_THRESHOLD || "75"),
-  });
-});
-
 // -------------------------
-// DEPARTMENTS & SUBJECTS APIs
+// CAMPUS CONFIGURATION APIs (Central Geofencing & Policy)
 // -------------------------
-const SUPPORTED_DEPARTMENTS = ["CSE", "CSE (IoT)", "AI/ML", "ECE"];
-
-app.get("/api/departments", async (req, res) => {
+app.get("/api/campus-config", async (req, res) => {
   try {
-    const customDepts = await Subject.distinct("department");
-    const merged = Array.from(new Set([...SUPPORTED_DEPARTMENTS, ...customDepts])).filter(Boolean);
-    res.json({ departments: merged });
+    const config = await CampusConfig.findOne();
+    if (config) {
+      cachedCampusConfig = {
+        name: config.name,
+        address: config.address,
+        latitude: config.latitude,
+        longitude: config.longitude,
+        radiusMeters: config.radiusMeters,
+        maxAccuracyMeters: config.maxAccuracyMeters,
+        attendanceThreshold: config.attendanceThreshold,
+      };
+    }
+    res.json(cachedCampusConfig);
   } catch (err) {
-    res.json({ departments: SUPPORTED_DEPARTMENTS });
+    res.json(cachedCampusConfig);
   }
 });
 
+app.put("/api/admin/campus-config", async (req, res) => {
+  try {
+    const {
+      name,
+      address,
+      latitude,
+      longitude,
+      radiusMeters,
+      maxAccuracyMeters,
+      attendanceThreshold,
+    } = req.body;
+
+    let config = await CampusConfig.findOne();
+    if (!config) {
+      config = new CampusConfig();
+    }
+    if (name) config.name = name;
+    if (address) config.address = address;
+    if (latitude !== undefined) config.latitude = Number(latitude);
+    if (longitude !== undefined) config.longitude = Number(longitude);
+    if (radiusMeters !== undefined) config.radiusMeters = Number(radiusMeters);
+    if (maxAccuracyMeters !== undefined) config.maxAccuracyMeters = Number(maxAccuracyMeters);
+    if (attendanceThreshold !== undefined) config.attendanceThreshold = Number(attendanceThreshold);
+    config.updatedAt = new Date();
+    await config.save();
+
+    cachedCampusConfig = {
+      name: config.name,
+      address: config.address,
+      latitude: config.latitude,
+      longitude: config.longitude,
+      radiusMeters: config.radiusMeters,
+      maxAccuracyMeters: config.maxAccuracyMeters,
+      attendanceThreshold: config.attendanceThreshold,
+    };
+
+    res.json({
+      message: "Campus geofence and academic configuration updated successfully",
+      config: cachedCampusConfig,
+    });
+  } catch (err) {
+    res.status(500).json({
+      message: "Failed to update campus configuration",
+      error: err.message,
+    });
+  }
+});
+
+// -------------------------
+// DYNAMIC DEPARTMENTS APIs (Requirement 4)
+// -------------------------
+const SUPPORTED_DEPARTMENTS = ["CSE", "CSE (IoT)", "AI/ML", "ECE", "ISE"];
+
+app.get("/api/departments", async (req, res) => {
+  try {
+    const dbDepts = await Department.find({ isActive: { $ne: false } }).sort({ code: 1 });
+    const deptCodes = dbDepts.map((d) => d.code);
+    const customDepts = await Subject.distinct("department");
+    const merged = Array.from(new Set([...SUPPORTED_DEPARTMENTS, ...deptCodes, ...customDepts])).filter(Boolean);
+    res.json({ departments: merged, details: dbDepts });
+  } catch (err) {
+    res.json({ departments: SUPPORTED_DEPARTMENTS, details: [] });
+  }
+});
+
+app.post("/api/admin/departments", async (req, res) => {
+  try {
+    const { name, code, description, totalSemesters } = req.body;
+    if (!name || !code) {
+      return res.status(400).json({ message: "Department name and code are required" });
+    }
+    const cleanCode = code.trim().toUpperCase();
+    const exists = await Department.findOne({ code: cleanCode });
+    if (exists) {
+      return res.status(400).json({ message: `Department with code ${cleanCode} already exists` });
+    }
+    const dept = await Department.create({
+      name: name.trim(),
+      code: cleanCode,
+      description: description || "",
+      totalSemesters: Number(totalSemesters) || 8,
+    });
+    res.json({ message: "Department created successfully", department: dept });
+  } catch (err) {
+    res.status(500).json({ message: "Unable to create department", error: err.message });
+  }
+});
+
+app.delete("/api/admin/departments/:id", async (req, res) => {
+  try {
+    await Department.findByIdAndUpdate(req.params.id, { $set: { isActive: false } });
+    res.json({ message: "Department deactivated successfully" });
+  } catch (err) {
+    res.status(500).json({ message: "Unable to deactivate department", error: err.message });
+  }
+});
+
+// -------------------------
+// DYNAMIC SUBJECTS APIs (Requirement 4)
+// -------------------------
 app.get("/api/subjects", async (req, res) => {
   try {
     const { department, semester } = req.query;
     const filter = {};
-    if (department) filter.department = department;
-    if (semester) filter.semester = Number(semester);
+    if (department && department !== "All") filter.department = department;
+    if (semester && semester !== "All") filter.semester = Number(semester);
 
     const subjects = await Subject.find(filter).sort({ name: 1 });
     res.json({ subjects });
   } catch (err) {
     res.status(500).json({ message: "Unable to fetch subjects", error: err.message });
+  }
+});
+
+app.post("/api/admin/subjects", async (req, res) => {
+  try {
+    const { name, code, department, semester, credits, facultyId, facultyName } = req.body;
+    if (!name || !code || !department) {
+      return res.status(400).json({ message: "Subject name, code, and department are required" });
+    }
+
+    const cleanName = name.trim();
+    const cleanCode = code.trim().toUpperCase();
+    const subject = await Subject.findOneAndUpdate(
+      { name: cleanName, department: department.trim() },
+      {
+        $set: {
+          name: cleanName,
+          code: cleanCode,
+          department: department.trim(),
+          semester: Number(semester) || 5,
+          facultyId: facultyId || "",
+          facultyName: facultyName || "",
+        },
+      },
+      { upsert: true, new: true }
+    );
+
+    if (facultyId || facultyName) {
+      const userFilter = facultyId
+        ? { email: facultyId.toLowerCase() }
+        : { name: facultyName, role: "faculty" };
+      await User.updateOne(userFilter, { $addToSet: { assignedSubjects: cleanName } });
+    }
+
+    res.json({ message: "Subject saved successfully", subject });
+  } catch (err) {
+    res.status(500).json({ message: "Unable to save subject", error: err.message });
+  }
+});
+
+app.delete("/api/admin/subjects/:id", async (req, res) => {
+  try {
+    await Subject.findByIdAndDelete(req.params.id);
+    res.json({ message: "Subject removed successfully" });
+  } catch (err) {
+    res.status(500).json({ message: "Unable to remove subject", error: err.message });
+  }
+});
+
+// -------------------------
+// FACULTY ASSIGNED SUBJECTS (Requirement 4)
+// -------------------------
+app.get("/api/faculty/my-subjects", async (req, res) => {
+  try {
+    const { email, name } = req.query;
+    let assigned = [];
+
+    if (email) {
+      const user = await User.findOne({ email: email.toLowerCase().trim() });
+      if (user && user.assignedSubjects?.length > 0) {
+        assigned = user.assignedSubjects;
+      }
+    }
+
+    const query = {
+      $or: [
+        ...(assigned.length > 0 ? [{ name: { $in: assigned } }] : []),
+        ...(email ? [{ facultyId: email.toLowerCase().trim() }] : []),
+        ...(name ? [{ facultyName: name.trim() }] : []),
+      ],
+    };
+
+    let subjects = [];
+    if (query.$or.length > 0) {
+      subjects = await Subject.find(query).sort({ name: 1 });
+    }
+
+    // If none assigned explicitly, fallback to department subjects for smooth faculty demo
+    if (subjects.length === 0) {
+      subjects = await Subject.find({ department: "CSE (IoT)" }).sort({ name: 1 });
+    }
+
+    res.json({ count: subjects.length, subjects });
+  } catch (err) {
+    res.status(500).json({ message: "Unable to fetch faculty subjects", error: err.message });
+  }
+});
+
+// -------------------------
+// ADMIN USER MANAGEMENT & ANALYTICS
+// -------------------------
+app.get("/api/admin/users", async (req, res) => {
+  try {
+    const { role, department } = req.query;
+    const filter = {};
+    if (role && role !== "All") filter.role = role;
+    if (department && department !== "All") filter.department = department;
+
+    const users = await User.find(filter).select("-password").sort({ name: 1 });
+    res.json({ count: users.length, users });
+  } catch (err) {
+    res.status(500).json({ message: "Unable to fetch users", error: err.message });
+  }
+});
+
+app.post("/api/admin/users", async (req, res) => {
+  try {
+    const { name, email, password, role, studentId, department, semester, rollNumber, assignedSubjects } = req.body;
+    if (!name || !email || !password || !role) {
+      return res.status(400).json({ message: "Name, email, password, and role are required" });
+    }
+    const cleanEmail = email.toLowerCase().trim();
+    const exists = await User.findOne({ email: cleanEmail });
+    if (exists) {
+      return res.status(400).json({ message: "User with this email already exists" });
+    }
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const user = await User.create({
+      name: name.trim(),
+      email: cleanEmail,
+      password: hashedPassword,
+      role,
+      studentId: studentId ? studentId.trim() : "",
+      department: department || "CSE (IoT)",
+      semester: semester ? Number(semester) : 5,
+      rollNumber: rollNumber || studentId || "",
+      assignedSubjects: Array.isArray(assignedSubjects) ? assignedSubjects : [],
+    });
+    res.json({ message: "User account created successfully", user });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to create user", error: err.message });
+  }
+});
+
+app.delete("/api/admin/users/:id", async (req, res) => {
+  try {
+    await User.findByIdAndDelete(req.params.id);
+    res.json({ message: "User account deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to delete user", error: err.message });
+  }
+});
+
+app.get("/api/admin/analytics", async (req, res) => {
+  try {
+    const totalStudents = await User.countDocuments({ role: "student" });
+    const totalFaculty = await User.countDocuments({ role: "faculty" });
+    const totalDepts = await Department.countDocuments({ isActive: { $ne: false } });
+    const totalSubjects = await Subject.countDocuments();
+    const activeSessions = await AttendanceSession.countDocuments({ active: true });
+    const totalSessions = await AttendanceSession.countDocuments();
+    const totalAttendanceMarked = await Attendance.countDocuments();
+
+    const threshold = parseFloat(process.env.ATTENDANCE_THRESHOLD || "75");
+    const students = await User.find({ role: "student" });
+    let lowAttendanceCount = 0;
+    const lowAttendanceList = [];
+
+    for (const st of students) {
+      const records = await Attendance.find({ studentId: st.studentId, status: "Present" });
+      const deptSessions = await AttendanceSession.countDocuments({ department: st.department || "CSE (IoT)" });
+      const held = Math.max(deptSessions, records.length);
+      const stats = calculateAttendanceStats(held, records.length, threshold);
+      if (stats.isLow && held > 0) {
+        lowAttendanceCount++;
+        lowAttendanceList.push({
+          studentId: st.studentId,
+          name: st.name,
+          department: st.department,
+          percentage: stats.percentage,
+          classesNeeded: stats.classesNeeded,
+        });
+      }
+    }
+
+    res.json({
+      institution: cachedCampusConfig.name,
+      totalStudents,
+      totalFaculty,
+      totalDepartments: Math.max(totalDepts, 5),
+      totalSubjects,
+      activeSessions,
+      totalSessions,
+      totalAttendanceMarked,
+      lowAttendanceCount,
+      lowAttendanceStudents: lowAttendanceList.slice(0, 10),
+      campusConfig: cachedCampusConfig,
+    });
+  } catch (err) {
+    res.status(500).json({ message: "Unable to generate analytics", error: err.message });
   }
 });
 
@@ -437,6 +918,29 @@ app.post("/api/session/create", async (req, res) => {
       message: "Unable to create session",
       error: error.message,
     });
+  }
+});
+
+// -------------------------
+// Faculty closes session
+// -------------------------
+app.post("/api/session/close", async (req, res) => {
+  try {
+    const { sessionId, sessionCode } = req.body;
+    if (!sessionId && !sessionCode) {
+      return res.status(400).json({ message: "sessionId or sessionCode is required" });
+    }
+    const query = sessionId ? { sessionId: String(sessionId).trim() } : { sessionCode: String(sessionCode).trim() };
+    const session = await AttendanceSession.findOne(query);
+    if (!session) {
+      return res.status(404).json({ message: "Session not found" });
+    }
+    session.active = false;
+    session.closedAt = new Date();
+    await session.save();
+    res.json({ message: "Session closed successfully", session });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to close session", error: err.message });
   }
 });
 
@@ -735,7 +1239,7 @@ app.post("/api/ai/count-people", async (req, res) => {
     const candidateUrls = [
       process.env.AI_SERVICE_URL,
       "https://smart-campus-ai-pz3m.onrender.com",
-      "http://localhost:5001",
+      "http://127.0.0.1:5001",
     ].filter(Boolean);
 
     const aiUrls = Array.from(new Set(candidateUrls));
@@ -746,15 +1250,39 @@ app.post("/api/ai/count-people", async (req, res) => {
         const targetUrl = `${baseUrl.replace(/\/$/, "")}/count-people`;
         console.log(`Forwarding headcount request to AI service: ${targetUrl}`);
 
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 60000);
+        const isLocal = baseUrl.includes("localhost") || baseUrl.includes("127.0.0.1");
+        const timeoutMs = isLocal ? 3000 : 60000;
 
-        const aiRes = await fetch(targetUrl, {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+        // Try JSON Base64 first
+        let aiRes = await fetch(targetUrl, {
           method: "POST",
-          body: formData,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image_base64: rawB64 }),
           signal: controller.signal,
+        }).catch((err) => {
+          console.warn(`JSON attempt to ${targetUrl} failed:`, err.message);
+          return null;
         });
+
+        // Fallback to FormData if needed
+        if (!aiRes || !aiRes.ok) {
+          try {
+            aiRes = await fetch(targetUrl, {
+              method: "POST",
+              body: formData,
+              signal: controller.signal,
+            });
+          } catch (fdErr) {
+            console.warn(`FormData attempt to ${targetUrl} failed:`, fdErr.message);
+          }
+        }
+
         clearTimeout(timeoutId);
+
+        if (!aiRes) continue;
 
         const aiText = await aiRes.text();
         let aiJson;
@@ -769,6 +1297,8 @@ app.post("/api/ai/count-people", async (req, res) => {
             success: true,
             count: Number(aiJson.count) || 0,
             confidence: aiJson.confidence || [],
+            detections: aiJson.detections || [],
+            annotated_image: aiJson.annotated_image || null,
             message: aiJson.message || "People detected successfully",
             aiUrl: targetUrl,
           });
@@ -1326,24 +1856,186 @@ app.post("/api/results/upload", async (req, res) => {
   }
 });
 
+app.post("/api/results/publish", async (req, res) => {
+  try {
+    const { department, semester, subject } = req.body;
+    const filter = {};
+    if (department && department !== "All") filter.department = department;
+    if (semester && semester !== "All") filter.semester = Number(semester);
+    if (subject && subject !== "All") filter.subject = new RegExp(`^${subject.trim()}$`, "i");
+
+    const updateRes = await Result.updateMany(filter, { $set: { published: true, updatedAt: new Date() } });
+    res.json({
+      message: "Results published successfully",
+      matchedCount: updateRes.matchedCount,
+      modifiedCount: updateRes.modifiedCount,
+    });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to publish results", error: err.message });
+  }
+});
+
+app.post("/api/results/unpublish", async (req, res) => {
+  try {
+    const { department, semester, subject } = req.body;
+    const filter = {};
+    if (department && department !== "All") filter.department = department;
+    if (semester && semester !== "All") filter.semester = Number(semester);
+    if (subject && subject !== "All") filter.subject = new RegExp(`^${subject.trim()}$`, "i");
+
+    const updateRes = await Result.updateMany(filter, { $set: { published: false, updatedAt: new Date() } });
+    res.json({
+      message: "Results unpublished successfully",
+      matchedCount: updateRes.matchedCount,
+      modifiedCount: updateRes.modifiedCount,
+    });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to unpublish results", error: err.message });
+  }
+});
+
 app.get("/api/results/student/:studentId", async (req, res) => {
   try {
     const { studentId } = req.params;
+    const { all } = req.query;
 
-    const results = await Result.find({
-      studentId: studentId.trim(),
-    }).sort({ subject: 1 });
+    const filter = { studentId: studentId.trim() };
+    if (!all || all === "false") {
+      filter.published = { $ne: false };
+    }
+
+    const results = await Result.find(filter).sort({ subject: 1 });
+
+    const enrichedResults = results.map((r) => {
+      const obj = r.toObject();
+      const pct = obj.percentage !== undefined ? obj.percentage : (obj.total || 0);
+      obj.isWeak = pct < 60;
+      return obj;
+    });
 
     res.json({
       studentId,
-      total: results.length,
-      results,
+      total: enrichedResults.length,
+      weakSubjectsCount: enrichedResults.filter((r) => r.isWeak).length,
+      results: enrichedResults,
     });
   } catch (error) {
     res.status(500).json({
       message: "Unable to fetch student results",
       error: error.message,
     });
+  }
+});
+
+// -------------------------
+// Full Student Comprehensive Academic Report (Requirement 9, 14, 16)
+// -------------------------
+app.get("/api/reports/student/:studentId/full", async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    const threshold = parseFloat(process.env.ATTENDANCE_THRESHOLD || "75");
+
+    const user = await User.findOne({ studentId: studentId.trim() });
+    if (!user) {
+      return res.status(404).json({ message: "Student not found" });
+    }
+
+    const studentDept = user.department || "CSE (IoT)";
+    const studentSem = user.semester || 5;
+
+    // 1. Attendance Data
+    const studentRecords = await Attendance.find({ studentId: studentId.trim() }).sort({ markedAt: -1 });
+    const departmentSubjects = await Subject.find({ department: studentDept, semester: studentSem });
+    const allSessions = await AttendanceSession.find();
+
+    const subjectSet = new Set(departmentSubjects.map((s) => s.name));
+    studentRecords.forEach((r) => subjectSet.add(r.subject));
+    allSessions.forEach((s) => {
+      if (s.department === studentDept || !s.department) subjectSet.add(s.subject);
+    });
+
+    const subjectList = Array.from(subjectSet).filter(Boolean);
+    let totalHeld = 0;
+    let totalAttended = 0;
+    const subjectAttendance = [];
+
+    for (const sub of subjectList) {
+      const sessionsHeldCount = await AttendanceSession.countDocuments({
+        subject: sub,
+        ...(studentDept ? { $or: [{ department: studentDept }, { department: { $exists: false } }] } : {}),
+      });
+      const attended = studentRecords.filter(
+        (r) => r.subject.toLowerCase() === sub.toLowerCase() && r.status === "Present"
+      ).length;
+      const held = Math.max(sessionsHeldCount, attended);
+      totalHeld += held;
+      totalAttended += attended;
+
+      const stats = calculateAttendanceStats(held, attended, threshold);
+      subjectAttendance.push({
+        subject: sub,
+        classesHeld: stats.classesHeld,
+        classesAttended: stats.classesAttended,
+        percentage: stats.percentage,
+        classesNeeded: stats.classesNeeded,
+        classesCanMiss: stats.classesCanMiss,
+        isEligible: stats.isEligible,
+        status: stats.status,
+      });
+    }
+
+    const overallAttendance = calculateAttendanceStats(totalHeld, totalAttended, threshold);
+
+    // 2. Results Data
+    const results = await Result.find({ studentId: studentId.trim(), published: { $ne: false } }).sort({ subject: 1 });
+    let totalMarks = 0;
+    let maxMarksTotal = 0;
+    const weakSubjects = [];
+
+    const enrichedResults = results.map((r) => {
+      const obj = r.toObject();
+      const pct = obj.percentage !== undefined ? obj.percentage : (obj.total || 0);
+      obj.isWeak = pct < 60;
+      totalMarks += obj.total || 0;
+      maxMarksTotal += obj.maxMarks || 100;
+      if (obj.isWeak) {
+        weakSubjects.push({ subject: obj.subject, total: obj.total, percentage: pct, grade: obj.grade });
+      }
+      return obj;
+    });
+
+    const overallPercentage = maxMarksTotal > 0 ? Number(((totalMarks / maxMarksTotal) * 100).toFixed(1)) : 0;
+    const sgpa = Number((overallPercentage / 10).toFixed(2));
+
+    res.json({
+      student: {
+        id: user._id,
+        studentId: user.studentId,
+        name: user.name,
+        email: user.email,
+        department: studentDept,
+        semester: studentSem,
+        rollNumber: user.rollNumber || user.studentId,
+      },
+      campusConfig: cachedCampusConfig,
+      attendance: {
+        threshold,
+        overall: overallAttendance,
+        subjects: subjectAttendance,
+        lowAttendanceCount: subjectAttendance.filter((s) => !s.isEligible).length,
+      },
+      academics: {
+        results: enrichedResults,
+        totalSubjectsEvaluated: enrichedResults.length,
+        overallPercentage,
+        sgpa,
+        weakSubjects,
+        weakSubjectsCount: weakSubjects.length,
+      },
+      generatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to generate comprehensive report", error: err.message });
   }
 });
 
