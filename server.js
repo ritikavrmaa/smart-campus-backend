@@ -741,17 +741,15 @@ app.get("/api/faculty/my-subjects", async (req, res) => {
       }
     }
 
-    const query = {
-      $or: [
-        ...(assigned.length > 0 ? [{ name: { $in: assigned } }] : []),
-        ...(email ? [{ facultyId: email.toLowerCase().trim() }] : []),
-        ...(name ? [{ facultyName: name.trim() }] : []),
-      ],
-    };
+    const orConditions = [
+      ...(assigned.length > 0 ? [{ name: { $in: assigned } }] : []),
+      ...(email ? [{ facultyId: email.toLowerCase().trim() }] : []),
+      ...(name ? [{ facultyName: name.trim() }] : []),
+    ];
 
     let subjects = [];
-    if (query.$or.length > 0) {
-      subjects = await Subject.find(query).sort({ name: 1 });
+    if (orConditions.length > 0) {
+      subjects = await Subject.find({ $or: orConditions }).sort({ name: 1 });
     }
 
     // If none assigned explicitly, fallback to department subjects for smooth faculty demo
@@ -759,7 +757,13 @@ app.get("/api/faculty/my-subjects", async (req, res) => {
       subjects = await Subject.find({ department: "CSE (IoT)" }).sort({ name: 1 });
     }
 
-    res.json({ count: subjects.length, subjects });
+    const subjectNames = subjects.map((s) => s.name || s);
+
+    res.json({
+      count: subjects.length,
+      subjects,
+      subjectNames,
+    });
   } catch (err) {
     res.status(500).json({ message: "Unable to fetch faculty subjects", error: err.message });
   }
